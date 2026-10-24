@@ -145,6 +145,12 @@ class CsvRepository:
         records.sort(key=lambda r: (-r.score, r.iri))
         return records[:limit]
 
+    def locality_counts(self):
+        counts = Counter(
+            (a.locality, a.postal_code) for a in self.addresses.values() if a.locality
+        )
+        return [(loc, pc, n) for (loc, pc), n in counts.items()]
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------

@@ -50,6 +50,10 @@ claude mcp add fdp -- /ABS/PATH/mcp-server/.venv/bin/python /ABS/PATH/mcp-server
 | `get_facility(iri)` | Full record: contacts, opening hours, description, services |
 | `find_nearest(latitude/longitude or postal_code, query, radius_km)` | "Nearest addiction counselling to 10551?" |
 | `data_quality_report(source, city, postal_code, limit)` | "Which Destatis records should we fix first?" · "How complete is the data for Berlin?" |
+| `normalize_locality(locality, postal_code)` | "Glachau, 8371" → Glauchau (08371) · "Frankfurt, 15230" → Frankfurt (Oder) |
+| `locality_variants(city)` | "How many ways is Berlin spelled?" → 24 spellings, 21 districts |
+
+`normalize_locality` uses the pool's own addresses as its reference. The most common city for a postcode is treated as canonical, and without a postcode only frequent cities are split, so "Castrop-Rauxel" stays whole. Official names that rules cannot derive (e.g. "Frankfurt (Oder)") are listed in `OFFICIAL_NAMES` in `fdp_mcp/locality.py`.
 
 `data_quality_report` checks each facility for phone, map location, opening hours (present and containing actual times), a valid 5-digit postcode, e-mail and website. It ranks records by how much their gaps hurt someone looking for help; the weights are in `fdp_mcp/quality.py`. The `source` filter works only with the live backend, because the CSV snapshot has no source attribution.
 
@@ -71,6 +75,7 @@ mcp-server/
 │   ├── models.py              # Facility / Address / Service
 │   ├── geo.py                 # haversine, bounding box
 │   ├── quality.py             # data-quality checks, weights, ranking
+│   ├── locality.py            # place-name normalisation
 │   └── repository/
 │       ├── __init__.py        # Repository protocol + backend factory
 │       ├── sparql.py          # live backend

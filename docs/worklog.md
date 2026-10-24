@@ -93,6 +93,25 @@ Plan and challenge analysis: [analysis_and_plan.md](analysis_and_plan.md)
 - **Postcodes are clean:** only 7 are not 5 digits, 3 of which lost a leading zero. Smaller than first thought, so the weight stays low.
 - Some Caritas entries are not help services (e.g. a "Diözesanrat", a church council), and one facility is named just "Kontakt". This is a relevance problem, not yet measured.
 
+### Step 3: `normalize_locality` and `locality_variants` tools
+- **Splitting on hyphens is wrong.** Real pool examples:
+
+  | Place name | What it actually is |
+  |---|---|
+  | `Berlin-Mitte` | Berlin + district |
+  | `Castrop-Rauxel`, `Bietigheim-Bissingen` | one city |
+  | `Frankfurt` (83 addresses) | Frankfurt am Main **or** Frankfurt (Oder) |
+  | `Frankfurt/M.`, `Frankfurt a. M.`, `Frankfurt/Main` | Frankfurt am Main |
+  | `Frankfurt a. d. Oder`, `Frankfurt(Oder)` | Frankfurt (Oder) |
+
+- **Decision: use the pool's own addresses as the reference** (7,581 locality/postcode combinations, 1,696 known cities).
+  - With a postcode, the most common city for that postcode is canonical. This fixes typos ("Glachau" + 8371 → Glauchau, 08371), resolves "Frankfurt", and flags conflicts ("Hamburg" + 10115 → conflicts with Berlin).
+  - Without a postcode, only frequent cities (≥3 addresses) are split. Ambiguous names get a note.
+  - An `OFFICIAL_NAMES` table covers names that rules cannot derive, such as Frankfurt (Oder), Mülheim an der Ruhr and Halle (Saale).
+- Result: Berlin's **24 spellings fold into 1 city with 21 districts**.
+- The index is built once per session in about 1 s, then cached.
+- Tests: 38 passing, including 18 locality cases modelled on real spellings.
+
 ### Next
+- Track 2: `map_to_schema` for one new source (beratungsfinder or afeefa).
 - Track 1: `is_open_now`. Parse free-text hours, return "unknown" when missing, and treat "nach Vereinbarung" as "by appointment".
-- Track 2: `normalize_locality` (23 Berlin spellings) → `map_to_schema` for one new source (beratungsfinder or afeefa).

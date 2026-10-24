@@ -59,6 +59,9 @@ class Repository(Protocol):
     ) -> list[QualityRecord]:
         """Facilities in scope ranked by quality score, worst first."""
 
+    def locality_counts(self) -> list[tuple[str, str | None, int]]:
+        """(locality, postcode, number of addresses) for every combination in the pool."""
+
 
 def get_repository() -> Repository:
     backend = os.environ.get("FDP_BACKEND", "sparql").lower()

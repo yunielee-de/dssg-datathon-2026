@@ -293,6 +293,18 @@ class SparqlRepository:
             ))
         return records
 
+    def locality_counts(self):
+        rows = self.query(
+            """
+            SELECT ?loc ?pc (COUNT(?a) AS ?n) WHERE {
+              ?a a schema:PostalAddress ; schema:addressLocality ?loc .
+              OPTIONAL { ?a schema:postalCode ?pc }
+            }
+            GROUP BY ?loc ?pc
+            """
+        )
+        return [(row["loc"], row.get("pc"), int(row["n"])) for row in rows]
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------

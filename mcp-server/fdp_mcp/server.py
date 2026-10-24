@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP
 
 from fdp_mcp import quality
 from fdp_mcp.geo import bounding_box, haversine_km
+from fdp_mcp.locality import LocalityIndex
 from fdp_mcp.models import to_dict
 from fdp_mcp.repository import IN_BOUNDS_LIMIT, get_repository
 
@@ -184,6 +185,56 @@ def data_quality_report(
         "common_gap_patterns": summary.gap_patterns,
         "records_to_fix_first": [to_dict(r) for r in records],
     }
+
+
+_locality_index: LocalityIndex | None = None
+
+
+def locality_index() -> LocalityIndex:
+    """Built on first use from all pool addresses (~1 s), then cached for the session."""
+
+    global _locality_index
+    if _locality_index is None:
+        _locality_index = LocalityIndex(repository.locality_counts())
+    return _locality_index
+
+
+@mcp.tool()
+def normalize_locality(locality: str, postal_code: str | None = None) -> dict:
+    """
+    Normalise a German place name to its canonical city and district,
+    e.g. "Berlin- Tempelhof" -> Berlin / Tempelhof, "Frankfurt/M." -> Frankfurt am Main.
+
+    With a postcode, the canonical city is the most common one among pool
+    addresses with that postcode. This fixes typos ("Glachau" + 08371 -> Glauchau),
+    resolves ambiguous names ("Frankfurt" + 15230 -> Frankfurt (Oder)), and
+    flags locality/postcode conflicts. Without a postcode, only frequent
+    cities are split, so "Castrop-Rauxel" stays one city.
+
+    Args:
+        locality: Place name as written in a record.
+        postal_code: Optional postcode; strongly improves accuracy.
+
+    Returns:
+        city, district, method (postcode/known_city/split/fuzzy/unchanged),
+        confidence (high/medium/low) and notes explaining each change.
+    """
+
+    return to_dict(locality_index().normalize(locality, postal_code))
+
+
+@mcp.tool()
+def locality_variants(city: str) -> dict:
+    """
+    List every spelling of a city found in the pool, with address counts and
+    the districts they contain. Useful to show how inconsistent place names are,
+    and which spellings a provider should clean up.
+
+    Args:
+        city: Canonical city name, e.g. "Berlin", "Frankfurt am Main", "Köln".
+    """
+
+    return locality_index().variants(city)
 
 
 def main():
