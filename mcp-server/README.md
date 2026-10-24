@@ -48,7 +48,10 @@ claude mcp add fdp -- /ABS/PATH/mcp-server/.venv/bin/python /ABS/PATH/mcp-server
 |---|---|
 | `search_facilities(query, postal_code, city, limit)` | "I can't pay my rent in Berlin, who can help?" → `query="Schuldnerberatung", city="Berlin"` |
 | `get_facility(iri)` | Full record: contacts, opening hours, description, services |
-| `find_nearest(latitude/longitude or postal_code, query, radius_km)` | "Nearest addiction counselling to 10551?" |
+| `is_open_now(iri, at)` | "Is this counselling centre open right now?" |
+| `find_nearest(latitude/longitude or postal_code, query, radius_km, open_now, at)` | "Nearest addiction counselling to 10551 that is open now?" |
+
+**Opening hours** are free text in the pool. `fdp_mcp/hours.py` parses them into weekly schedules and separates opening, consultation, phone and holiday hours. It handles formats like "Mo - Fr 9-12 Uhr", "Mo, Mi & Fr …", "montags bis donnerstags …", the schema.org style "Mo 08:00-17:00;Tu …", "außer freitags" and misspelled weekdays. Every search and nearest result carries an `open_now` status: `open` (with `until`), `closed` (with `next_opening`), `by_appointment` or `unknown`. **Unknown is never treated as closed**: with `open_now=True`, excluded facilities are counted so the assistant can suggest calling them. It reads 79% of opening-hours texts fully; see `docs/data_quality_profile.md` §5.
 | `data_quality_report(source, city, postal_code, limit)` | "Which Destatis records should we fix first?" · "How complete is the data for Berlin?" |
 | `normalize_locality(locality, postal_code)` | "Glachau, 8371" → Glauchau (08371) · "Frankfurt, 15230" → Frankfurt (Oder) |
 | `locality_variants(city)` | "How many ways is Berlin spelled?" → 24 spellings, 21 districts |
@@ -94,6 +97,7 @@ mcp-server/
 │   ├── geo.py                 # haversine, bounding box
 │   ├── quality.py             # data-quality checks, weights, ranking
 │   ├── locality.py            # place-name normalisation
+│   ├── hours.py               # free-text opening hours -> weekly schedule, open now?
 │   ├── mapping.py             # new-source schema mapping, validation, pool matching
 │   ├── sources/               # adapters for candidate sources (beratungsfinder)
 │   └── repository/

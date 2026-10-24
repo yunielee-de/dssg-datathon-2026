@@ -142,6 +142,34 @@ Plan and challenge analysis: [analysis_and_plan.md](analysis_and_plan.md)
   - Source quality is excellent (99% phone, 100% e-mail, 94% coordinates), but it has **no opening hours at all**.
 - Tests: 44 passing (6 new mapping tests on synthetic data).
 
+### Step 5: `is_open_now` and open-now filtering (track 1)
+- **Input:** all 2,622 opening-hours texts from the live pool, analysed locally and not committed (some contain names).
+  - median length 71 characters
+  - 22% use day ranges ("Mo - Fr"), 20% mention "Vereinbarung" (by appointment), 15% are multi-line
+  - mixes of opening, consultation ("Sprechstunde") and phone ("Telefonische Erreichbarkeit") hours
+- **Design** (`fdp_mcp/hours.py`):
+  - Find day expressions and attach the following time ranges to them.
+  - Track the kind of hours: opening, consultation, phone, holidays.
+  - **Never guess:** times without weekdays are reported, not assigned, and doubtful results are flagged `partial`.
+- **Accuracy over coverage.** The first version parsed 79% of texts, but spot checks showed some **wrong** schedules. That's worse than "unknown", because it tells someone a place is open when it isn't. Fixed through two manual audits of 30 random results each:
+
+  | Audit | Wrong results | Fixes |
+  |---|---|---|
+  | Audit 1 | 4/30 | "8: 00" read as 00:00; "außer freitags" ignored; school-holiday hours mixed into weekly hours; "Tel. Sprechzeiten" not seen as phone hours; a narrower day group now overrides an overlapping wider one ("Mo-Fr 8-19 … Fr 8-17") |
+  | Audit 2 | 2/30 | misspelled weekdays ("Mitwoch") via fuzzy matching, guarded so "Dienst" and "Feiertag" are not weekdays; monthly patterns ("am 1. Freitag im Monat") are dropped, not read as weekly |
+
+  Also handled:
+  - " ? " in place of an en dash, from encoding damage in 35 source texts
+  - "Mo-Mi-Do" read as a list of days
+  - lowercase and uppercase day abbreviations, while the German word "so" is not read as Sunday
+- **Result:** 79% read fully, 2% partial (flagged), 5% appointment only, 6% times without weekdays, and 8% not opening hours at all (phone numbers, addresses, bus directions).
+  - Only **2,080 of 37,341 facilities (1 in 18)** can answer "open now?" automatically.
+- **Tools:**
+  - New `is_open_now(iri, at)`.
+  - Search and nearest results carry an `open_now` status.
+  - `find_nearest(open_now=True)` counts the excluded facilities (closed, unknown, appointment only), so the assistant can suggest calling the unknown ones. **Unknown never means closed.**
+- **Live demo:** Monday 10:00, addiction counselling near 10551, open now → 3 open (nearest 0.47 km, until 17:00); 3 nearby facilities with unknown hours are reported separately.
+- Tests: 80 passing (36 hours tests, including every audit regression).
+
 ### Next
-- Track 1: `is_open_now`. Parse free-text hours, return "unknown" when missing, and treat "nach Vereinbarung" as "by appointment".
 - Demo script + pitch slides.

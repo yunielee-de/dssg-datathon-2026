@@ -48,7 +48,20 @@ Comparing tables 1 and 2 shows the value of federation. For example, Destatis de
 | Distinct locality spellings starting with "Berlin" | 23 |
 | Distinct locality values with stray spaces/hyphens ("Berlin- Tempelhof") | 142 |
 
-## 5. Ten records to fix first
+## 5. Can opening hours be read by a machine?
+Of the opening hours that exist, how many the `is_open_now` parser turns into a weekly schedule.
+
+| Outcome | Facilities | Share |
+|---|---|---|
+| weekly schedule read | 2,080 | 79% |
+| read, but partial | 49 | 2% |
+| appointment only | 132 | 5% |
+| times without weekdays | 162 | 6% |
+| not opening hours (phone numbers, addresses, ...) | 199 | 8% |
+
+Also found: 13 texts with misspelled weekdays (e.g. "Mitwoch"), and 35 with an en dash lost to an encoding error ("Mo ? Do").
+
+## 6. Ten records to fix first
 Score = sum of weights of failed checks (phone number 3, map location 3, opening hours 2, opening hours with actual times 1, valid 5-digit postcode 1, e-mail address 1, website 1), +5 if there is no phone, e-mail or website at all.
 
 | Score | Facility | Place | Sources | Missing |

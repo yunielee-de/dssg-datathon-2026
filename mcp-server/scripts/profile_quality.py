@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from fdp_mcp import quality  # noqa: E402
+from fdp_mcp import hours, quality  # noqa: E402
 from fdp_mcp.repository import DEFAULT_SPARQL_ENDPOINT  # noqa: E402
 from fdp_mcp.repository.sparql import MAPPED_GRAPH, MATCHES_GRAPH, SparqlRepository  # noqa: E402
 
@@ -104,6 +104,33 @@ def text_field_stats(repo: SparqlRepository) -> list[str]:
     ]
 
 
+def hours_readability(repo: SparqlRepository) -> list[str]:
+    """How many opening-hours texts the is_open_now parser can turn into a weekly schedule."""
+
+    rows = repo.query("SELECT ?f ?h WHERE { ?f a org:OrganizationalUnit ; schema:openingHours ?h }")
+    by_facility: dict[str, list[str]] = {}
+    for row in rows:
+        by_facility.setdefault(row["f"], []).append(row["h"])
+    outcome = {"weekly schedule read": 0, "read, but partial": 0, "appointment only": 0,
+               "times without weekdays": 0, "not opening hours (phone numbers, addresses, ...)": 0}
+    typos = damaged = 0
+    for texts in by_facility.values():
+        text = "\n".join(texts)
+        s = hours.parse(text)
+        typos += any(n.startswith("read misspelled") for n in s.notes)
+        damaged += " ? " in text
+        key = ("read, but partial" if s.partial else "weekly schedule read" if s.parsed
+               else "appointment only" if s.appointment else "times without weekdays" if s.times_without_days
+               else "not opening hours (phone numbers, addresses, ...)")
+        outcome[key] += 1
+    n = len(by_facility)
+    lines = ["| Outcome | Facilities | Share |", "|---|---|---|"]
+    lines += [f"| {k} | {v:,} | {pct(v, n)} |" for k, v in outcome.items()]
+    lines += ["", f"Also found: {typos} texts with misspelled weekdays (e.g. \"Mitwoch\"), and {damaged} with an "
+              "en dash lost to an encoding error (\"Mo ? Do\")."]
+    return lines
+
+
 def worst_records(repo: SparqlRepository) -> list[str]:
     lines = ["| Score | Facility | Place | Sources | Missing |", "|---|---|---|---|---|"]
     for r in repo.records_to_fix(limit=10):
@@ -143,7 +170,12 @@ def main(out: Path):
         "",
         *text_field_stats(repo),
         "",
-        "## 5. Ten records to fix first",
+        "## 5. Can opening hours be read by a machine?",
+        f"Of the {quality.CHECKS[2].label} that exist, how many the `is_open_now` parser turns into a weekly schedule.",
+        "",
+        *hours_readability(repo),
+        "",
+        "## 6. Ten records to fix first",
         f"Score = sum of weights of failed checks ({weights}), "
         f"+{quality.NO_CONTACT_PENALTY} if there is no phone, e-mail or website at all.",
         "",

@@ -201,9 +201,11 @@ class CsvRepository:
     @staticmethod
     def _summary(row, address: Address | None) -> Facility:
         phone = _clean(row["schema:telephone"])
+        hours = _clean(row["schema:openingHours"])
         return Facility(
             iri=row["iri"],
             name=_clean(row["schema:name"]),
             address=address,
             telephone=[phone] if phone else [],
+            opening_hours=[hours] if hours else [],
         )

@@ -52,6 +52,8 @@ def _score_expr() -> str:
 # Directory entity IRIs look like https://civic-data.de/federated-directory#org-dcd15d72996f
 IRI_PATTERN = re.compile(r"^https://civic-data\.de/federated-directory#[A-Za-z0-9_-]+$")
 MAX_DESCRIPTION_CHARS = 1500
+# Joins several opening-hours values in one result cell (U+241E, never in real text).
+HOURS_SEPARATOR = "\u241e"
 
 
 def literal(value: str) -> str:
@@ -125,7 +127,7 @@ class SparqlRepository:
             f"""
             SELECT ?f (SAMPLE(?n) AS ?name) (SAMPLE(?street) AS ?st) (SAMPLE(?pc) AS ?postal)
                    (SAMPLE(?loc) AS ?locality) (SAMPLE(?lat) AS ?la) (SAMPLE(?lon) AS ?lo)
-                   (SAMPLE(?tel) AS ?phone)
+                   (SAMPLE(?tel) AS ?phone) (GROUP_CONCAT(DISTINCT STR(?oh); SEPARATOR="\u241E") AS ?hours)
             WHERE {{
               {{
                 SELECT DISTINCT ?f WHERE {{
@@ -136,6 +138,7 @@ class SparqlRepository:
               }}
               ?f schema:name ?n .
               OPTIONAL {{ ?f schema:telephone ?tel }}
+              OPTIONAL {{ ?f schema:openingHours ?oh }}
               OPTIONAL {{
                 ?f schema:address ?a .
                 OPTIONAL {{ ?a schema:streetAddress ?street }}
@@ -194,7 +197,7 @@ class SparqlRepository:
             f"""
             SELECT ?f (SAMPLE(?n) AS ?name) (SAMPLE(?street) AS ?st) (SAMPLE(?pc) AS ?postal)
                    (SAMPLE(?loc) AS ?locality) (SAMPLE(?lat) AS ?la) (SAMPLE(?lon) AS ?lo)
-                   (SAMPLE(?tel) AS ?phone)
+                   (SAMPLE(?tel) AS ?phone) (GROUP_CONCAT(DISTINCT STR(?oh); SEPARATOR="\u241E") AS ?hours)
             WHERE {{
               ?f a org:OrganizationalUnit ; schema:name ?n ; schema:address ?a .
               ?a schema:latitude ?lat ; schema:longitude ?lon .
@@ -205,6 +208,7 @@ class SparqlRepository:
               OPTIONAL {{ ?a schema:postalCode ?pc }}
               OPTIONAL {{ ?a schema:addressLocality ?loc }}
               OPTIONAL {{ ?f schema:telephone ?tel }}
+              OPTIONAL {{ ?f schema:openingHours ?oh }}
             }}
             GROUP BY ?f
             LIMIT {int(limit)}
@@ -394,6 +398,7 @@ class SparqlRepository:
                 longitude=_float(row.get("lo")),
             ),
             telephone=[row["phone"]] if row.get("phone") else [],
+            opening_hours=[h for h in row.get("hours", "").split(HOURS_SEPARATOR) if h],
         )
 
     def _address(self, address_iri: str) -> Address:
