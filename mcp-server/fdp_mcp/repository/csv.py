@@ -1,0 +1,127 @@
+"""Offline backend: reads the CSV snapshot in data/snapshot/.
+
+The snapshot is a small sample of the pool (≈180 facilities). Use it for
+offline development, tests, and as a demo fallback if the endpoint is down.
+"""
+
+from pathlib import Path
+
+import pandas as pd
+
+from fdp_mcp.models import Address, Facility, Service
+from fdp_mcp.repository import IN_BOUNDS_LIMIT
+
+
+def _clean(value):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _float(value) -> float | None:
+    try:
+        return float(value) if _clean(value) is not None else None
+    except ValueError:
+        return None
+
+
+class CsvRepository:
+    name = "csv"
+
+    def __init__(self, data_dir: Path):
+        read = lambda stem: pd.read_csv(data_dir / f"{stem}.csv", dtype=str, encoding="utf-8")
+        self.facilities = read("einrichtungSchema")
+        self.services = read("angebotSchema")
+        self.addresses = {
+            row["iri"]: Address(
+                street=_clean(row["schema:streetAddress"]),
+                postal_code=_clean(row["schema:postalCode"]),
+                locality=_clean(row["schema:addressLocality"]),
+                latitude=_float(row["schema:latitude"]),
+                longitude=_float(row["schema:longitude"]),
+            )
+            for _, row in read("adresseSchema").iterrows()
+        }
+
+    # ------------------------------------------------------------------
+    # Repository protocol
+    # ------------------------------------------------------------------
+
+    def search_facilities(self, text=None, postal_code=None, locality=None, limit=20):
+        results = []
+        for _, row in self.facilities.iterrows():
+            address = self.addresses.get(row["schema:address"])
+            if text:
+                haystack = f"{_clean(row['schema:name']) or ''} {_clean(row.get('schema:description')) or ''}"
+                if text.lower() not in haystack.lower():
+                    continue
+            if postal_code and (not address or address.postal_code != postal_code.strip()):
+                continue
+            if locality and (
+                not address
+                or not (address.locality or "").lower().startswith(locality.strip().lower())
+            ):
+                continue
+            results.append(self._summary(row, address))
+        results.sort(key=lambda f: (f.name or "").lower())
+        return results[:limit]
+
+    def get_facility(self, iri):
+        match = self.facilities[self.facilities["iri"] == iri]
+        if match.empty:
+            return None
+        row = match.iloc[0]
+        facility = self._summary(row, self.addresses.get(row["schema:address"]))
+        facility.email = [_clean(row["schema:email"])] if _clean(row["schema:email"]) else []
+        facility.homepage = _clean(row["foaf:homepage"]) or _clean(row["schema:mainEntityOfPage"])
+        facility.category = _clean(row["schema:category"])
+        facility.opening_hours = [_clean(row["schema:openingHours"])] if _clean(row["schema:openingHours"]) else []
+        facility.accessibility = _clean(row["schema:accessibilitySummary"])
+        offered = self.services[self.services["schema:provider"] == iri]
+        facility.services = [
+            Service(
+                iri=s["iri"],
+                name=_clean(s["schema:name"]),
+                category=_clean(s["schema:category"]),
+                audience=_clean(s["schema:audience"]),
+            )
+            for _, s in offered.iterrows()
+        ]
+        return facility
+
+    def facilities_in_bounds(self, south, north, west, east, text=None, limit=IN_BOUNDS_LIMIT):
+        results = []
+        for _, row in self.facilities.iterrows():
+            address = self.addresses.get(row["schema:address"])
+            if not address or address.latitude is None or address.longitude is None:
+                continue
+            if text and text.lower() not in (_clean(row["schema:name"]) or "").lower():
+                continue
+            if south <= address.latitude <= north and west <= address.longitude <= east:
+                results.append(self._summary(row, address))
+        return results[:limit]
+
+    def postcode_centroid(self, postal_code):
+        points = [
+            (a.latitude, a.longitude)
+            for a in self.addresses.values()
+            if a.postal_code == postal_code.strip() and a.latitude is not None and a.longitude is not None
+        ]
+        if not points:
+            return None
+        return sum(p[0] for p in points) / len(points), sum(p[1] for p in points) / len(points)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _summary(row, address: Address | None) -> Facility:
+        phone = _clean(row["schema:telephone"])
+        return Facility(
+            iri=row["iri"],
+            name=_clean(row["schema:name"]),
+            address=address,
+            telephone=[phone] if phone else [],
+        )

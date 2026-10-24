@@ -1,0 +1,60 @@
+"""Offline tests: geo helpers, SPARQL escaping, CSV backend. No network needed."""
+
+import pytest
+
+from fdp_mcp.geo import bounding_box, haversine_km
+from fdp_mcp.repository import DEFAULT_SNAPSHOT_DIR
+from fdp_mcp.repository.csv import CsvRepository
+from fdp_mcp.repository.sparql import check_iri, literal
+
+
+def test_haversine_berlin_hamburg():
+    assert haversine_km(52.5200, 13.4050, 53.5511, 9.9937) == pytest.approx(255, abs=3)
+
+
+def test_bounding_box_contains_radius():
+    south, north, west, east = bounding_box(52.52, 13.405, 5)
+    assert haversine_km(52.52, 13.405, north, 13.405) == pytest.approx(5, rel=0.01)
+    assert haversine_km(52.52, 13.405, 52.52, east) == pytest.approx(5, rel=0.01)
+    assert south < 52.52 < north and west < 13.405 < east
+
+
+def test_literal_escapes_injection():
+    assert literal('a" } DROP ALL #') == '"a\\" } DROP ALL #"'
+    assert literal("back\\slash\nline") == '"back\\\\slash\\nline"'
+
+
+@pytest.mark.parametrize(
+    "bad", ["https://evil.example/x", "https://civic-data.de/federated-directory#org-1> } #", ""]
+)
+def test_check_iri_rejects_foreign_or_malformed(bad):
+    with pytest.raises(ValueError):
+        check_iri(bad)
+
+
+@pytest.fixture(scope="module")
+def csv_repo():
+    return CsvRepository(DEFAULT_SNAPSHOT_DIR)
+
+
+def test_csv_search_city_prefix(csv_repo):
+    results = csv_repo.search_facilities(locality="Berlin", limit=500)
+    assert results
+    assert all(f.address.locality.lower().startswith("berlin") for f in results)
+
+
+def test_csv_get_facility_with_services(csv_repo):
+    facility = csv_repo.get_facility("https://civic-data.de/federated-directory#org-34e986356c61")
+    assert facility is not None
+    assert len(facility.services) == 2
+
+
+def test_csv_get_facility_unknown(csv_repo):
+    assert csv_repo.get_facility("https://civic-data.de/federated-directory#org-doesnotexist") is None
+
+
+def test_csv_postcode_centroid_and_bounds(csv_repo):
+    centre = csv_repo.postcode_centroid("13407")
+    assert centre is not None
+    nearby = csv_repo.facilities_in_bounds(*bounding_box(*centre, 2))
+    assert nearby
