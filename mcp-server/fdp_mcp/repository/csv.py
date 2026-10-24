@@ -151,6 +151,21 @@ class CsvRepository:
         )
         return [(loc, pc, n) for (loc, pc), n in counts.items()]
 
+    def facilities_in_postcodes(self, postal_codes):
+        codes = set(postal_codes)
+        results = []
+        for _, row in self.facilities.iterrows():
+            address = self.addresses.get(row["schema:address"])
+            if address and address.postal_code in codes:
+                results.append({
+                    "iri": row["iri"],
+                    "name": _clean(row["schema:name"]),
+                    "postal_code": address.postal_code,
+                    "telephone": [t] if (t := _clean(row["schema:telephone"])) else [],
+                    "email": [e] if (e := _clean(row["schema:email"])) else [],
+                })
+        return results
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------

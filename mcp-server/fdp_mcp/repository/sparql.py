@@ -305,6 +305,36 @@ class SparqlRepository:
         )
         return [(row["loc"], row.get("pc"), int(row["n"])) for row in rows]
 
+    def facilities_in_postcodes(self, postal_codes):
+        codes = sorted({pc for pc in postal_codes if pc})
+        if not codes:
+            return []
+        values = " ".join(literal(pc) for pc in codes)
+        rows = self.query(
+            f"""
+            SELECT ?f ?pc (SAMPLE(?n) AS ?name)
+                   (GROUP_CONCAT(DISTINCT STR(?tel); SEPARATOR="|") AS ?phones)
+                   (GROUP_CONCAT(DISTINCT STR(?mail); SEPARATOR="|") AS ?emails)
+            WHERE {{
+              VALUES ?pc {{ {values} }}
+              ?f a org:OrganizationalUnit ; schema:name ?n ; schema:address/schema:postalCode ?pc .
+              OPTIONAL {{ ?f schema:telephone ?tel }}
+              OPTIONAL {{ ?f schema:email ?mail }}
+            }}
+            GROUP BY ?f ?pc
+            """
+        )
+        return [
+            {
+                "iri": row["f"],
+                "name": row.get("name"),
+                "postal_code": row["pc"],
+                "telephone": [t for t in row.get("phones", "").split("|") if t],
+                "email": [e for e in row.get("emails", "").split("|") if e],
+            }
+            for row in rows
+        ]
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------

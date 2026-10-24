@@ -53,6 +53,24 @@ claude mcp add fdp -- /ABS/PATH/mcp-server/.venv/bin/python /ABS/PATH/mcp-server
 | `normalize_locality(locality, postal_code)` | "Glachau, 8371" → Glauchau (08371) · "Frankfurt, 15230" → Frankfurt (Oder) |
 | `locality_variants(city)` | "How many ways is Berlin spelled?" → 24 spellings, 21 districts |
 
+| `preview_source_mapping(source, location, radius_km, limit, skip)` | "Which counselling centres in Leipzig from beratungsfinder are missing from the pool?" |
+| `validate_record(name, postal_code, locality, …)` | Check one record the AI extracted from a web page or flyer |
+| *prompt* `map_new_source(source_text)` | Guides the AI to extract facilities from unstructured text and validate each one |
+
+**Mapping new sources (track 2).** Records from a new source are mapped onto the pool schema (facility, address, services, provider), validated, and compared with pool facilities in the same postcode. Each record gets one of these statuses:
+
+| Status | Meaning |
+|---|---|
+| `new` | Nothing in the pool matches |
+| `already_in_pool` | Similar name **and** shared phone or e-mail |
+| `same_organisation` | Shared contact only: likely a department, so add it as a service of the existing facility |
+| `possible_duplicate` | Similar name only: needs a human look |
+| `not_checked` | Shelter: never cross-matched |
+
+Name similarity ignores umbrella organisations (Caritasverband, Diakonie, *-verband*, *-stiftung* …) and the place name. **Shelters (Frauenhäuser)** keep their location secret: their street and coordinates are dropped, and they are never geocoded or matched. Nothing is written to the pool; the tools only produce a reviewed proposal.
+
+Adapters live in `fdp_mcp/sources/`. `beratungsfinder` uses the public JSON API behind beratungsfinder.de (~14k counselling centres). `python scripts/estimate_source_overlap.py` writes an aggregate assessment to [`docs/new_source_beratungsfinder.md`](../docs/new_source_beratungsfinder.md).
+
 `normalize_locality` uses the pool's own addresses as its reference. The most common city for a postcode is treated as canonical, and without a postcode only frequent cities are split, so "Castrop-Rauxel" stays whole. Official names that rules cannot derive (e.g. "Frankfurt (Oder)") are listed in `OFFICIAL_NAMES` in `fdp_mcp/locality.py`.
 
 `data_quality_report` checks each facility for phone, map location, opening hours (present and containing actual times), a valid 5-digit postcode, e-mail and website. It ranks records by how much their gaps hurt someone looking for help; the weights are in `fdp_mcp/quality.py`. The `source` filter works only with the live backend, because the CSV snapshot has no source attribution.
@@ -76,11 +94,15 @@ mcp-server/
 │   ├── geo.py                 # haversine, bounding box
 │   ├── quality.py             # data-quality checks, weights, ranking
 │   ├── locality.py            # place-name normalisation
+│   ├── mapping.py             # new-source schema mapping, validation, pool matching
+│   ├── sources/               # adapters for candidate sources (beratungsfinder)
 │   └── repository/
 │       ├── __init__.py        # Repository protocol + backend factory
 │       ├── sparql.py          # live backend
 │       └── csv.py             # snapshot backend
-├── scripts/profile_quality.py # writes docs/data_quality_profile.md
+├── scripts/
+│   ├── profile_quality.py     # writes docs/data_quality_profile.md
+│   └── estimate_source_overlap.py  # writes docs/new_source_beratungsfinder.md
 ├── data/snapshot/             # CSV sample of the pool
 └── tests/
 ```

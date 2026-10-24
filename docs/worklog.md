@@ -112,6 +112,36 @@ Plan and challenge analysis: [analysis_and_plan.md](analysis_and_plan.md)
 - The index is built once per session in about 1 s, then cached.
 - Tests: 38 passing, including 18 locality cases modelled on real spellings.
 
+### Step 4: mapping new sources (`preview_source_mapping`, `validate_record`, prompt `map_new_source`)
+- **Choosing a source.** I checked the four sources the partner suggested:
+  - Beratungsfinder and afeefa both allow crawling (robots.txt).
+  - **Beratungsfinder** (run by DAJEB) has a **public JSON API** behind its website: `POST /api/BeratungsstelleSearch` with `take`/`skip` paging and `location`/`umkreisKm` radius search. I read the request format from the site's own frontend code. No HTML scraping is needed, and it holds **14,097 counselling centres**.
+  - Beratungsfinder was chosen.
+- **Design: two paths.**
+  1. **Structured source:** an adapter (`fdp_mcp/sources/beratungsfinder.py`) maps each API record to facility + address + services (one per counselling topic) + provider.
+  2. **Unstructured input** (web page, flyer): the MCP prompt `map_new_source` has the AI client extract the records, and `validate_record` checks each one. No AI API key is needed on the server.
+- **Validation** (`fdp_mcp/mapping.py`): fixes postcodes (8371 → 08371), normalises localities (reuses `normalize_locality`), validates e-mail and URL formats, and flags a missing street, contact or opening hours.
+- **Duplicate check against the live pool** (same postcode). Statuses:
+
+  | Status | Meaning |
+  |---|---|
+  | `already_in_pool` | name + contact match |
+  | `same_organisation` | contact only: a department of an existing facility, so add it as a service |
+  | `possible_duplicate` | name only |
+  | `new` | no match |
+
+  Iterations based on real results:
+  - v1 marked departments sharing the umbrella's central phone as "already in pool", so I added `same_organisation`.
+  - v2 word matching was fooled by umbrella names ("… Caritasverband Leipzig"), so umbrella words, organisation suffixes (*-verband*, *-stiftung* …) and place names are now ignored.
+  - Compound words now match ("Jugenddrogenberatung" ~ "Jugenddrogenberatungsstelle").
+- **Ethics: shelters.** Women's shelters keep their address secret to protect residents; the source itself publishes them as "Ort in Niedersachsen" or without a street. **Rule: confidential records are never geocoded, enriched or cross-matched,** and street and coordinates are dropped.
+- **Privacy:** the source contains staff names in e-mail addresses. Raw records are **not committed**; tests use synthetic data, and docs contain aggregates only.
+- **Result** ([new_source_beratungsfinder.md](new_source_beratungsfinder.md), sample of 400 spread across the source):
+  - **73% are not in the pool**, about 10,300 centres. This is an upper bound: duplicates are only searched within the same postcode.
+  - 11% are departments of existing facilities, 8% are already in the pool, and 4% are shelters.
+  - Source quality is excellent (99% phone, 100% e-mail, 94% coordinates), but it has **no opening hours at all**.
+- Tests: 44 passing (6 new mapping tests on synthetic data).
+
 ### Next
-- Track 2: `map_to_schema` for one new source (beratungsfinder or afeefa).
 - Track 1: `is_open_now`. Parse free-text hours, return "unknown" when missing, and treat "nach Vereinbarung" as "by appointment".
+- Demo script + pitch slides.

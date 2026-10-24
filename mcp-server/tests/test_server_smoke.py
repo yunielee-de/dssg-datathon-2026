@@ -31,7 +31,7 @@ async def _run():
 def test_server_tools_over_stdio():
     tools, search, nearest, report, locality = asyncio.run(_run())
     assert {"search_facilities", "get_facility", "find_nearest", "data_quality_report",
-            "normalize_locality", "locality_variants"} <= tools
+            "normalize_locality", "locality_variants", "preview_source_mapping", "validate_record"} <= tools
     assert report["facilities_checked"] > 0 and len(report["records_to_fix_first"]) <= 5
     assert locality["cleaned"] == "Berlin-Mitte"
     assert search["count"] == 3
