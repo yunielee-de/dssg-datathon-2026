@@ -8,6 +8,7 @@ import sys
 
 from mcp.server.fastmcp import FastMCP
 
+from fdp_mcp import quality
 from fdp_mcp.geo import bounding_box, haversine_km
 from fdp_mcp.models import to_dict
 from fdp_mcp.repository import IN_BOUNDS_LIMIT, get_repository
@@ -132,6 +133,57 @@ def find_nearest(
     if len(candidates) >= IN_BOUNDS_LIMIT:
         result["warning"] = "Too many facilities in this area; results may be incomplete. Narrow radius_km or add a query."
     return result
+
+
+@mcp.tool()
+def data_quality_report(
+    source: str | None = None,
+    city: str | None = None,
+    postal_code: str | None = None,
+    limit: int = 20,
+) -> dict:
+    """
+    Data-quality report for the pool's maintainers and data providers:
+    which fields are missing, what to fix first, and which records to fix first.
+
+    Checks per facility: phone, map location, opening hours (present and
+    containing actual times), valid 5-digit postcode, e-mail, website.
+    Records are ranked by how much the gaps hurt someone looking for help
+    (unreachable facilities with no phone/e-mail/website rank highest).
+
+    Args:
+        source: Limit to records contributed by one source:
+            "caritas", "dhs", "awo", "destatis" or "sozialplattform".
+            A merged facility counts for every source that contributed to it.
+        city: City name; prefix match, so "Berlin" also covers "Berlin-Mitte".
+        postal_code: Exact German postcode.
+        limit: How many worst records to list (1-50).
+
+    Returns:
+        coverage per check, recommended fixes ordered by impact, the most
+        common combinations of gaps, and the worst records with their sources.
+    """
+
+    summary = repository.quality_summary(source=source, locality=city, postal_code=postal_code)
+    records = repository.records_to_fix(
+        source=source, locality=city, postal_code=postal_code, limit=min(max(limit, 1), MAX_LIMIT)
+    )
+    total = summary.total
+    return {
+        "backend": repository.name,
+        "scope": {k: v for k, v in {"source": source, "city": city, "postal_code": postal_code}.items() if v},
+        "facilities_checked": total,
+        "coverage": {
+            check.label: {
+                "passing": summary.passing[check.key],
+                "pct": round(100 * summary.passing[check.key] / total, 1) if total else 0.0,
+            }
+            for check in quality.CHECKS
+        },
+        "recommended_actions": quality.recommended_actions(total, summary.passing),
+        "common_gap_patterns": summary.gap_patterns,
+        "records_to_fix_first": [to_dict(r) for r in records],
+    }
 
 
 def main():

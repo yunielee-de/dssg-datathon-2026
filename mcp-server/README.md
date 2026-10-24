@@ -49,6 +49,12 @@ claude mcp add fdp -- /ABS/PATH/mcp-server/.venv/bin/python /ABS/PATH/mcp-server
 | `search_facilities(query, postal_code, city, limit)` | "I can't pay my rent in Berlin, who can help?" → `query="Schuldnerberatung", city="Berlin"` |
 | `get_facility(iri)` | Full record: contacts, opening hours, description, services |
 | `find_nearest(latitude/longitude or postal_code, query, radius_km)` | "Nearest addiction counselling to 10551?" |
+| `data_quality_report(source, city, postal_code, limit)` | "Which Destatis records should we fix first?" · "How complete is the data for Berlin?" |
+
+`data_quality_report` checks each facility for phone, map location, opening hours (present and containing actual times), a valid 5-digit postcode, e-mail and website. It ranks records by how much their gaps hurt someone looking for help; the weights are in `fdp_mcp/quality.py`. The `source` filter works only with the live backend, because the CSV snapshot has no source attribution.
+
+### Data-quality profile
+`python scripts/profile_quality.py` regenerates [`docs/data_quality_profile.md`](../docs/data_quality_profile.md) from the live pool in about 30 s. It contains per-source coverage, what each source delivers before merging, merge statistics, free-text and format problems, and the top records to fix.
 
 Notes:
 - **City is a prefix match.** "Berlin" also matches "Berlin-Mitte" and "Berlin-Wedding".
@@ -64,10 +70,12 @@ mcp-server/
 │   ├── server.py              # tool definitions (FastMCP)
 │   ├── models.py              # Facility / Address / Service
 │   ├── geo.py                 # haversine, bounding box
+│   ├── quality.py             # data-quality checks, weights, ranking
 │   └── repository/
 │       ├── __init__.py        # Repository protocol + backend factory
 │       ├── sparql.py          # live backend
 │       └── csv.py             # snapshot backend
+├── scripts/profile_quality.py # writes docs/data_quality_profile.md
 ├── data/snapshot/             # CSV sample of the pool
 └── tests/
 ```

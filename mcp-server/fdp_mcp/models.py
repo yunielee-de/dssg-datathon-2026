@@ -37,6 +37,26 @@ class Facility:
     distance_km: float | None = None
 
 
+@dataclass
+class QualityRecord:
+    iri: str
+    name: str | None
+    locality: str | None
+    postal_code: str | None
+    score: int
+    missing: list[str]
+    sources: list[str] = field(default_factory=list)
+
+
+@dataclass
+class QualitySummary:
+    total: int
+    # check key -> number of records passing it
+    passing: dict[str, int]
+    # most common combinations of failed checks: {"missing": [...], "records": n}
+    gap_patterns: list[dict]
+
+
 def to_dict(obj) -> dict:
     """Convert a dataclass to a dict, dropping empty values to save LLM context."""
 

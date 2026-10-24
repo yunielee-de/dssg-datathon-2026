@@ -30,6 +30,14 @@ def test_postcode_centroid_in_berlin(repo):
     assert 52.4 < lat < 52.6 and 13.2 < lon < 13.5
 
 
+def test_quality_by_source(repo):
+    summary = repo.quality_summary(source="destatis")
+    assert 0 < summary.total < 5000
+    records = repo.records_to_fix(source="destatis", limit=5)
+    assert records and all("destatis" in r.sources for r in records)
+    assert [r.score for r in records] == sorted((r.score for r in records), reverse=True)
+
+
 def test_bounds_keyword_filter(repo):
     results = repo.facilities_in_bounds(52.40, 52.65, 13.10, 13.75, text="sucht", limit=200)
     assert results

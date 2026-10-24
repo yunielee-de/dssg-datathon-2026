@@ -8,8 +8,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from fdp_mcp.models import Address, Facility, Service
+import re
+from collections import Counter
+
+from fdp_mcp import quality
+from fdp_mcp.models import Address, Facility, QualityRecord, QualitySummary, Service
 from fdp_mcp.repository import IN_BOUNDS_LIMIT
+
+POSTCODE = re.compile(r"^[0-9]{5}$")
 
 
 def _clean(value):
@@ -112,9 +118,64 @@ class CsvRepository:
             return None
         return sum(p[0] for p in points) / len(points), sum(p[1] for p in points) / len(points)
 
+    def quality_summary(self, source=None, locality=None, postal_code=None):
+        scoped = self._quality_scope(source, locality, postal_code)
+        patterns = Counter(tuple(quality.missing_labels(ok)) for _, _, ok in scoped)
+        return QualitySummary(
+            total=len(scoped),
+            passing={k: sum(ok[k] for _, _, ok in scoped) for k in quality.CHECK_KEYS},
+            gap_patterns=[
+                {"missing": list(missing), "records": n} for missing, n in patterns.most_common(8)
+            ],
+        )
+
+    def records_to_fix(self, source=None, locality=None, postal_code=None, limit=20):
+        scoped = self._quality_scope(source, locality, postal_code)
+        records = [
+            QualityRecord(
+                iri=row["iri"],
+                name=_clean(row["schema:name"]),
+                locality=address.locality if address else None,
+                postal_code=address.postal_code if address else None,
+                score=quality.score(ok),
+                missing=quality.missing_labels(ok),
+            )
+            for row, address, ok in scoped
+        ]
+        records.sort(key=lambda r: (-r.score, r.iri))
+        return records[:limit]
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _quality_scope(self, source, locality, postal_code):
+        """(row, address, ok-flags) for every facility in scope."""
+
+        if quality.resolve_source(source):
+            raise ValueError("The CSV snapshot has no source attribution; use the live (sparql) backend.")
+        scoped = []
+        for _, row in self.facilities.iterrows():
+            address = self.addresses.get(row["schema:address"])
+            if postal_code and (not address or address.postal_code != postal_code.strip()):
+                continue
+            if locality and (
+                not address
+                or not (address.locality or "").lower().startswith(locality.strip().lower())
+            ):
+                continue
+            hours = _clean(row["schema:openingHours"])
+            ok = {
+                "telephone": _clean(row["schema:telephone"]) is not None,
+                "coordinates": bool(address and address.latitude is not None),
+                "opening_hours": hours is not None,
+                "opening_hours_has_times": hours is None or any(ch.isdigit() for ch in hours),
+                "postal_code_valid": bool(address and POSTCODE.match(address.postal_code or "")),
+                "email": _clean(row["schema:email"]) is not None,
+                "homepage": _clean(row["foaf:homepage"]) is not None,
+            }
+            scoped.append((row, address, ok))
+        return scoped
 
     @staticmethod
     def _summary(row, address: Address | None) -> Facility:

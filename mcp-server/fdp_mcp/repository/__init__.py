@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Protocol
 
-from fdp_mcp.models import Facility
+from fdp_mcp.models import Facility, QualityRecord, QualitySummary
 
 DEFAULT_SPARQL_ENDPOINT = "https://sosuse.correlaid.org/directory/sparql"
 DEFAULT_SNAPSHOT_DIR = Path(__file__).resolve().parents[2] / "data" / "snapshot"
@@ -44,6 +44,20 @@ class Repository(Protocol):
 
     def postcode_centroid(self, postal_code: str) -> tuple[float, float] | None:
         """Mean coordinates of all pool addresses with this postcode."""
+
+    def quality_summary(
+        self, source: str | None = None, locality: str | None = None, postal_code: str | None = None
+    ) -> QualitySummary:
+        """How many facilities in scope pass each quality check (see fdp_mcp.quality)."""
+
+    def records_to_fix(
+        self,
+        source: str | None = None,
+        locality: str | None = None,
+        postal_code: str | None = None,
+        limit: int = 20,
+    ) -> list[QualityRecord]:
+        """Facilities in scope ranked by quality score, worst first."""
 
 
 def get_repository() -> Repository:

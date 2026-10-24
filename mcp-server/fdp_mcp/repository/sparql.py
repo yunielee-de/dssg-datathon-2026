@@ -9,16 +9,46 @@ import re
 
 import httpx
 
-from fdp_mcp.models import Address, Facility, Service
+from fdp_mcp import quality
+from fdp_mcp.models import Address, Facility, QualityRecord, QualitySummary, Service
 from fdp_mcp.repository import IN_BOUNDS_LIMIT
 
 SCHEMA = "http://schema.org/"
 FOAF = "http://xmlns.com/foaf/0.1/"
+PIPELINE = "https://civic-data.de/pipeline#"
 PREFIXES = """\
 PREFIX schema: <http://schema.org/>
 PREFIX org: <http://www.w3.org/ns/org#>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX cdp: <https://civic-data.de/pipeline#>
 """
+MATCHES_GRAPH = "<urn:directory:data/pipeline/matches.ttl>"
+MAPPED_GRAPH = "<urn:directory:data/pipeline/mapped.ttl>"
+
+# SPARQL boolean expression per quality check: true = the facility ?f passes.
+CHECK_SPARQL = {
+    "telephone": "EXISTS { ?f schema:telephone [] }",
+    "coordinates": "EXISTS { ?f schema:address/schema:latitude [] }",
+    "opening_hours": "EXISTS { ?f schema:openingHours [] }",
+    # Passes unless an opening-hours value contains no digit at all (e.g. a contact name).
+    "opening_hours_has_times": 'NOT EXISTS { ?f schema:openingHours ?h0 FILTER(!REGEX(STR(?h0), "[0-9]")) }',
+    "postal_code_valid": 'EXISTS { ?f schema:address/schema:postalCode ?pc0 FILTER(REGEX(STR(?pc0), "^[0-9]{5}$")) }',
+    "email": "EXISTS { ?f schema:email [] }",
+    "homepage": "EXISTS { ?f foaf:homepage [] }",
+}
+assert set(CHECK_SPARQL) == set(quality.CHECK_KEYS)
+
+
+def _check_binds() -> str:
+    return "\n".join(f"BIND({expr} AS ?ok_{key})" for key, expr in CHECK_SPARQL.items())
+
+
+def _score_expr() -> str:
+    terms = [f"IF(?ok_{c.key}, 0, {c.weight})" for c in quality.CHECKS]
+    contact = " || ".join(f"?ok_{k}" for k in quality.CONTACT_KEYS)
+    terms.append(f"IF({contact}, 0, {quality.NO_CONTACT_PENALTY})")
+    return " + ".join(terms)
 # Directory entity IRIs look like https://civic-data.de/federated-directory#org-dcd15d72996f
 IRI_PATTERN = re.compile(r"^https://civic-data\.de/federated-directory#[A-Za-z0-9_-]+$")
 MAX_DESCRIPTION_CHARS = 1500
@@ -196,9 +226,119 @@ class SparqlRepository:
             return None
         return float(rows[0]["la"]), float(rows[0]["lo"])
 
+    def quality_summary(self, source=None, locality=None, postal_code=None):
+        scope = self._scope(source, locality, postal_code)
+        sums = " ".join(f"(SUM(IF(?ok_{k}, 1, 0)) AS ?{k})" for k in quality.CHECK_KEYS)
+        totals = self.query(
+            f"SELECT (COUNT(?f) AS ?total) {sums} WHERE {{ {scope} {_check_binds()} }}"
+        )[0]
+        flags = " ".join(f"?ok_{k}" for k in quality.CHECK_KEYS)
+        patterns = self.query(
+            f"""
+            SELECT {flags} (COUNT(?f) AS ?n) WHERE {{ {scope} {_check_binds()} }}
+            GROUP BY {flags} ORDER BY DESC(?n) LIMIT 8
+            """
+        )
+        return QualitySummary(
+            total=int(totals["total"]),
+            passing={k: int(totals.get(k, 0)) for k in quality.CHECK_KEYS},
+            gap_patterns=[
+                {
+                    "missing": quality.missing_labels(self._ok(row)),
+                    "records": int(row["n"]),
+                }
+                for row in patterns
+            ],
+        )
+
+    def records_to_fix(self, source=None, locality=None, postal_code=None, limit=20):
+        scope = self._scope(source, locality, postal_code)
+        flags = " ".join(f"?ok_{k}" for k in quality.CHECK_KEYS)
+        rows = self.query(
+            f"""
+            SELECT ?f {flags} ?score (SAMPLE(?n) AS ?name) (SAMPLE(?loc) AS ?locality) (SAMPLE(?pc) AS ?postal)
+            WHERE {{
+              {{
+                SELECT ?f {flags} ?score WHERE {{
+                  {scope}
+                  {_check_binds()}
+                  BIND({_score_expr()} AS ?score)
+                }}
+                ORDER BY DESC(?score) ?f
+                LIMIT {int(limit)}
+              }}
+              OPTIONAL {{ ?f schema:name ?n }}
+              OPTIONAL {{
+                ?f schema:address ?a .
+                OPTIONAL {{ ?a schema:addressLocality ?loc }}
+                OPTIONAL {{ ?a schema:postalCode ?pc }}
+              }}
+            }}
+            GROUP BY ?f {flags} ?score
+            ORDER BY DESC(?score) ?f
+            """
+        )
+        sources = self._sources_of([row["f"] for row in rows])
+        records = []
+        for row in rows:
+            ok = self._ok(row)
+            records.append(QualityRecord(
+                iri=row["f"],
+                name=row.get("name"),
+                locality=row.get("locality"),
+                postal_code=row.get("postal"),
+                score=quality.score(ok),
+                missing=quality.missing_labels(ok),
+                sources=sources.get(row["f"], []),
+            ))
+        return records
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _scope(source, locality, postal_code) -> str:
+        """Graph pattern binding ?f to the published facilities in scope."""
+
+        parts = ["?f a org:OrganizationalUnit ."]
+        source_key = quality.resolve_source(source)
+        if source_key:
+            parts.append(
+                f"FILTER EXISTS {{ GRAPH {MATCHES_GRAPH} {{ ?f cdp:hasMember ?r0 }} "
+                f"GRAPH {MAPPED_GRAPH} {{ ?r0 cdp:fromSource cdp:{quality.SOURCES[source_key]} }} }}"
+            )
+        if postal_code:
+            parts.append(f"FILTER EXISTS {{ ?f schema:address/schema:postalCode {literal(postal_code.strip())} }}")
+        if locality:
+            parts.append(
+                f"FILTER EXISTS {{ ?f schema:address/schema:addressLocality ?l0 "
+                f"FILTER(STRSTARTS(LCASE(STR(?l0)), {literal(locality.strip().lower())})) }}"
+            )
+        return "\n".join(parts)
+
+    @staticmethod
+    def _ok(row: dict[str, str]) -> dict[str, bool]:
+        return {k: row.get(f"ok_{k}") in ("true", "1") for k in quality.CHECK_KEYS}
+
+    def _sources_of(self, iris: list[str]) -> dict[str, list[str]]:
+        if not iris:
+            return {}
+        values = " ".join(check_iri(iri) for iri in iris)
+        rows = self.query(
+            f"""
+            SELECT DISTINCT ?f ?src WHERE {{
+              VALUES ?f {{ {values} }}
+              GRAPH {MATCHES_GRAPH} {{ ?f cdp:hasMember ?r }}
+              GRAPH {MAPPED_GRAPH} {{ ?r cdp:fromSource ?src }}
+            }}
+            """
+        )
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            name = row["src"].removeprefix(PIPELINE)
+            result.setdefault(row["f"], []).append(quality.SOURCE_BY_IRI_NAME.get(name, name))
+        return result
 
     def _summary(self, row: dict[str, str]) -> Facility:
         return Facility(

@@ -54,6 +54,45 @@ Plan and challenge analysis: [analysis_and_plan.md](analysis_and_plan.md)
 - We don't push to the official `dssg-berlin` repo. That remote is renamed `upstream`, with its push URL disabled.
 - Code and this log go to a personal GitHub repo (`yunielee-de`).
 
+### Why track 2 starts with profiling (decision)
+- The MCP server can only answer as well as the data allows. Profiling shows **which** gaps are real, so we build tools for those rather than for assumed ones.
+- We **can't edit the pool**: it is rebuilt from the providers' systems. Our output is a ranked "what to fix" list per provider.
+- The numbers are the pitch's "Problem" slide.
+
+### Step 2: data-quality profile and `data_quality_report` tool
+- `fdp_mcp/quality.py` holds one set of checks and weights, used by both backends and by the profile script.
+
+  | Check | Weight |
+  |---|---|
+  | phone | 3 |
+  | map location | 3 |
+  | opening hours | 2 |
+  | hours contain actual times | 1 |
+  | valid 5-digit postcode | 1 |
+  | e-mail | 1 |
+  | website | 1 |
+  | no contact channel at all (no phone, e-mail or website) | +5 |
+
+- Ranking is computed **inside SPARQL** over all 37k facilities, in 1–3 s per query.
+- Per-source filtering joins published facilities → `matches.ttl` (hasMember) → `mapped.ttl` (fromSource).
+- New MCP tool `data_quality_report(source, city, postal_code, limit)` returns:
+  - coverage per check
+  - recommended actions ordered by impact (records affected × weight)
+  - the most common gap combinations
+  - the worst records, with their sources
+- `scripts/profile_quality.py` → [data_quality_profile.md](data_quality_profile.md) (about 30 s, live).
+- Tests: 20 passing.
+
+### Key findings (live pool, 2026-10-24)
+- **Opening hours are the biggest gap:** only 7% of facilities have them (Caritas 3%). DHS is the exception at 83%.
+  - Of the 2,622 facilities that do have hours, 221 contain no times at all (e.g. a contact name), and 533 say "nach Vereinbarung" (by appointment).
+- **5,229 facilities (14%) have no phone, e-mail or website.** Nobody can contact them through the directory.
+- **Destatis and AWO deliver no phone numbers.** After merging, 21% of Destatis facilities have one, which shows the value of federation.
+- **Merging is rare:** 36,218 facilities come from 1 source, and only 1,123 combine 2–4 sources.
+- **Berlin is spelled 23 ways.** 142 distinct locality values have stray spaces or hyphens ("Berlin- Tempelhof").
+- **Postcodes are clean:** only 7 are not 5 digits, 3 of which lost a leading zero. Smaller than first thought, so the weight stays low.
+- Some Caritas entries are not help services (e.g. a "Diözesanrat", a church council), and one facility is named just "Kontakt". This is a relevance problem, not yet measured.
+
 ### Next
-- Track 1: `is_open_now` (parse free-text opening hours, return "unknown" when missing), plus one MCP prompt.
-- Track 2: profiling notebook (coverage per source) → `data_quality_report` → `normalize_locality` → `map_to_schema` for one new source (beratungsfinder or afeefa).
+- Track 1: `is_open_now`. Parse free-text hours, return "unknown" when missing, and treat "nach Vereinbarung" as "by appointment".
+- Track 2: `normalize_locality` (23 Berlin spellings) → `map_to_schema` for one new source (beratungsfinder or afeefa).
