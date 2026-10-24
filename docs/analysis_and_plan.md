@@ -86,6 +86,11 @@ The data pool repo has ready-made SPARQL queries under `webapp/content/queries/`
 
 **Pitch story:** "An MCP server that answers real questions from **live** pool data, and that also helps the pool **fix itself and grow**."
 
+### How tracks 1 and 2 relate
+They run **in parallel**, and both end up as tools in the **same MCP server**. Neither blocks the other.
+- **Track 1 is for citizens.** It works on today's data. Missing fields are reported as "unknown", never guessed.
+- **Track 2 is for the pool's maintainers.** We **cannot edit** the pool's data: it belongs to the providers and is rebuilt from their sources. Track 2 tools **detect, rank and suggest** fixes, and **map new sources** onto the schema. The providers apply the fixes at the source.
+
 ### Target tools
 
 | Track | Tool | Answers |
